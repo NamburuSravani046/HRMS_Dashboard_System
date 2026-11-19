@@ -1,0 +1,206 @@
+import * as authServices from "../services/auth.service.js";
+import { successResponse, errorResponse } from "../utils/response.utils.js";
+import { setAccessTokenCookie, setCookie } from "../services/cookie.service.js";
+import STATUS from "../constants/Status.js";
+import AppError from "../utils/Error.utils.js";
+import { UserIP } from "../models/Associations.model.js";
+
+import { clearCookie } from "../services/cookie.service.js";
+import { getLocationFromIp } from "../utils/geo.utils.js";
+
+export const signUp = async (req, res, next) => {
+  try {
+    const result = await authServices.signUpService(req.body);
+
+    if (result.success) {
+      return successResponse(res, result, result.message, STATUS.ACCEPTED);
+    } else {
+      return errorResponse(res, result.message, STATUS.NOT_ACCEPTABLE);
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyOtp = async (req, res, next) => {
+  try {
+    let { email, otp, purpose } = req.body;
+
+    if (!purpose || !otp || !email) {
+      throw new AppError(403, "Email or Purpose or OTP is required");
+    }
+    purpose = purpose.toUpperCase();
+
+    const result = await authServices.verifyOtpService(email, otp, purpose);
+
+    if (result.success) {
+      return successResponse(res, result, result.message, STATUS.ACCEPTED);
+    } else {
+      return errorResponse(res, result.message, STATUS.NOT_ACCEPTABLE);
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const logIn = async (req, res, next) => {
+  try {
+    const result = await authServices.logInService(req.body);
+
+    if (!result.success) {
+      return errorResponse(
+        res,
+
+        result.message,
+        STATUS.UNAUTHORIZED,
+      );
+    }
+
+    setCookie(res, "token", result.token);
+    setCookie(res, "accessToken", result.refreshToken);
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress;
+
+    const ipData = await getLocationFromIp(ip);
+
+    await UserIP.create({
+      tenantId: result.user.tenantId || null,
+      userAgent: req.headers["user-agent"] || "unknown",
+      ipAddress: ipData?.ip || ip,
+      country: ipData?.country_name || null,
+      region: ipData?.state_prov || null,
+      city: ipData?.city || null,
+      isp: ipData?.isp || ipData?.organization || null,
+      userId: result.user.id,
+    });
+
+    return successResponse(res, result, result.message, STATUS.OK);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const logOut = async (req, res, next) => {
+  try {
+    let response = await authServices.logOutService(req.user.id);
+
+    if (response.success) {
+      clearCookie(res, "token");
+      return successResponse(
+        res,
+        response.data,
+        "User Successfully LogOut",
+        STATUS.OK,
+      );
+    } else {
+      return errorResponse(
+        res,
+
+        "Something went wrong",
+        STATUS.UNAUTHORIZED,
+      );
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const me = async (req, res, next) => {
+  try {
+    const response = await authServices.me(req.user.id);
+
+    if (response.success) {
+      return successResponse(res, response.user, response.message, STATUS.OK);
+    } else {
+      return errorResponse(res, response.message, STATUS.UNAUTHORIZED);
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getAccessToken = async (req, res, next) => {
+  try {
+    const refreshToken = req.cookies.token;
+    if (!refreshToken) {
+      return errorResponse(res, "Refresh token not found", STATUS.UNAUTHORIZED);
+    }
+
+    const response = await authServices.getAccessToken(refreshToken);
+
+    setCookie(res, "accessToken", response.accessToken);
+
+    if (response.success) {
+      return successResponse(
+        res,
+        { accessToken: response.accessToken },
+        response.message,
+        STATUS.OK,
+      );
+    } else {
+      return errorResponse(res, response.message, STATUS.UNAUTHORIZED);
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const forgetPassword = async (req, res, next) => {
+  try {
+    const response = await authServices.forgetPasswordService(req.body.email);
+
+    if (response.success) {
+      return successResponse(
+        res,
+        response.data,
+        response.message,
+        response.status,
+      );
+    } else {
+      return errorResponse(res, response.message, response.status);
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resetPassword = async (req, res, next) => {
+  try {
+    const response = await authServices.resetPasswordService(req.body);
+
+    if (response.success) {
+      return successResponse(
+        res,
+        response.data,
+        response.message,
+        response.status,
+      );
+    } else {
+      return errorResponse(res, response.message, response.status);
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resendOtp = async (req, res, next) => {
+  try {
+    const response = await authServices.resendOtpService(
+      req.body.email,
+      req.body.purpose,
+    );
+
+    if (response.success) {
+      return successResponse(
+        res,
+        response.data,
+        response.message,
+        response.status,
+      );
+    } else {
+      return errorResponse(res, response.message, response.status);
+    }
+  } catch (error) {
+    next(error);
+  }
+};

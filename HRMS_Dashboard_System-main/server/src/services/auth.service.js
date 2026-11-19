@@ -1,0 +1,414 @@
+import {
+  AttendancePolicy,
+  Employee,
+  User,
+  UserIP,
+} from "../models/Associations.model.js";
+import { generateOtp } from "../config/otpService.js";
+import bcrypt from "bcrypt";
+import ExpressError from "../utils/Error.utils.js";
+import { nanoid } from "nanoid";
+import { LeavePolicy } from "../models/Associations.model.js";
+import { sequelize } from "../config/db.js";
+
+import jwtSign, { jwtAccessSign } from "../utils/jwt.utils.js";
+import { createOTP } from "../config/otpService.js";
+import { findOtpData } from "../config/otpService.js";
+import { getTenantOrGlobalWhere } from "../utils/tenant.utils.js";
+import STATUS from "../constants/Status.js";
+
+export const signUpService = async ({ first_name, email, password }) => {
+  if (!email || !password) {
+    return {
+      success: false,
+      message: "Email and password are required",
+    };
+  }
+
+  const exists = await User.findOne({ where: { email } });
+  if (exists) {
+    return {
+      success: false,
+      message: "User already exists",
+    };
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  let user = await User.create({
+    id: nanoid(),
+    first_name: first_name,
+    email: email,
+    password: hashedPassword,
+    isVerified: false,
+    role: "employee",
+  });
+
+  const otp = generateOtp();
+
+  await createOTP(email, otp, "SIGNUP");
+
+  return {
+    success: true,
+    message: "You have to Verify your account first. OTP sent to email",
+    data: user,
+  };
+};
+
+export const logInService = async ({ email, password }) => {
+  const user = await User.findOne({ where: { email } });
+
+  if (!user) {
+    throw new ExpressError(404, "User not found");
+  }
+
+  const valid = await bcrypt.compare(password, user.password);
+  if (!valid) {
+    throw new ExpressError(401, "Invalid Password");
+  }
+
+  const ipDetails = await UserIP.findOne({
+    where: { userId: user.id, tenantId: user.tenantId || null },
+    order: [["createdAt", "DESC"]],
+    attributes: {
+      include: ["isBlocked"],
+    },
+  });
+
+  if (ipDetails && ipDetails.isBlocked && user.role != "admin") {
+    return {
+      success: false,
+      message: "Your IP address is blocked, Contact Admin",
+    };
+  }
+
+  if (user.isBlocked) {
+    return { success: false, message: "User is blocked" };
+  }
+
+  if (!user.isVerified) {
+    const otp = generateOtp();
+    await createOTP(email, otp, "LOGIN");
+
+    return {
+      success: true,
+      user: {
+        id: user.id,
+        role: user.role,
+        isVerified: user.isVerified,
+      },
+      message: "Please verify your account",
+    };
+  }
+
+  const attendancePolicy = await AttendancePolicy.findOne({
+    where: getTenantOrGlobalWhere(user.tenantId, { isDefault: true }),
+    order: [["tenantId", "DESC"]],
+  });
+
+  if (attendancePolicy) {
+    user.attendancePolicyId = attendancePolicy.id;
+  }
+
+  const token = jwtSign(user.id, user.role, user.tenantId);
+  const refreshToken = jwtAccessSign(user.id, user.role, user.tenantId);
+
+  user.login_At = new Date();
+  user.isVerified = true;
+  await user.save();
+
+  return {
+    success: true,
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      tenantId: user.tenantId,
+      isVerified: user.isVerified,
+    },
+    token,
+    refreshToken,
+    message: "Login successful",
+  };
+};
+
+export const verifyOtpService = async (email, otp, purpose) => {
+  const transaction = await sequelize.transaction();
+  try {
+    
+    const otpData = await findOtpData(email, purpose);
+
+    if (!otpData) {
+      return {
+        success: false,
+        message: "OTP not found",
+      };
+    }
+
+    if (otpData.expiresAt < new Date()) {
+      return {
+        success: false,
+        message: "OTP expired",
+      };
+    }
+
+    const valid = await bcrypt.compare(otp, otpData.otp);
+    if (!valid) {
+      return {
+        success: false,
+        message: "Invalid OTP",
+      };
+    }
+
+    otpData.isUsed = true;
+    await otpData.save({ transaction });
+
+    let user = await User.findOne({
+      where: {
+        email,
+      },
+    });
+
+    await Employee.update(
+      { isActive: true },
+      { where: { userId: user.id }, transaction },
+    );
+
+    user.isVerified = true;
+    await user.save({ transaction });
+
+
+    const leavePolicy = await LeavePolicy.findOne({
+      where: getTenantOrGlobalWhere(user.tenantId, { isActive: true }),
+      order: [["tenantId", "DESC"]],
+    });
+
+    if (leavePolicy) {
+      user.leavePolicyId = leavePolicy.id;
+    }
+
+    if (purpose === "SIGNUP") {
+      await User.update(
+        { isVerified: true },
+        { where: { email }, transaction },
+      );
+      await transaction.commit();
+      return { success: true, message: "Account verified successfully" };
+    }
+
+    if (purpose === "LOGIN") {
+      await transaction.commit();
+      return { success: true, message: "Login OTP verified" };
+    }
+  } catch (error) {
+    await transaction.rollback();
+    throw new ExpressError(STATUS.BAD_REQUEST, error.message);
+  }
+};
+
+export const logOutService = async (userId) => {
+  try {
+    const user = await User.findOne({ where: { id: userId }, raw: true });
+
+    if (!user) {
+      return {
+        success: false,
+        message: "User not found",
+      };
+    }
+
+    return {
+      success: true,
+      message: "User logged out successfully",
+    };
+  } catch (error) {
+    throw new AppError(400, error.message);
+  }
+};
+
+export const me = async (userId) => {
+  try {
+    const userData = await User.findOne({ where: { id: userId } });
+
+    if (!userData) {
+      return {
+        success: false,
+        message: "User not found",
+      };
+    }
+
+    return {
+      success: true,
+      user: {
+        email: userData.email,
+        role: userData.role,
+        tenantId: userData.tenantId,
+        isBlocked: userData.isBlocked,
+        isVerified: userData.isVerified,
+      },
+    };
+  } catch (error) {
+    throw new ExpressError(STATUS.BAD_REQUEST, error.message);
+  }
+};
+
+export const getAccessToken = async (refreshToken) => {
+  try {
+    const accessToken = jwtAccessSign(
+      refreshToken.id,
+      refreshToken.role,
+      refreshToken.tenantId,
+    );
+
+    return {
+      success: true,
+      accessToken,
+      message: "Access token generated successfully",
+    };
+  } catch (error) {
+    throw new AppError(400, error.message);
+  }
+};
+
+export const forgetPasswordService = async (email) => {
+  try {
+    if (!email) {
+      return {
+        success: false,
+        message: "Email is required",
+        status: STATUS.BAD_REQUEST,
+      };
+    }
+
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      return {
+        success: false,
+        message: "User not found",
+        status: STATUS.NOT_FOUND,
+      };
+    }
+
+    const otp = generateOtp();
+    await createOTP(email, otp, "FORGOT_PASSWORD");
+
+    return {
+      success: true,
+      message: "OTP sent to your email",
+      status: STATUS.OK,
+    };
+  } catch (error) {
+    throw new ExpressError(STATUS.BAD_REQUEST, error.message);
+  }
+};
+
+export const resetPasswordService = async ({
+  email,
+  purpose,
+  otp,
+  newPassword,
+  confirmPassword,
+}) => {
+  try {
+    const normalizedPurpose = (purpose || "FORGOT_PASSWORD").toUpperCase();
+
+    if (!email || !otp || !newPassword || !confirmPassword) {
+      return {
+        success: false,
+        message: "Email, OTP, new password and confirm password are required",
+        status: STATUS.BAD_REQUEST,
+      };
+    }
+
+    if (newPassword !== confirmPassword) {
+      return {
+        success: false,
+        message: "Passwords do not match",
+        status: STATUS.BAD_REQUEST,
+      };
+    }
+    const otpData = await findOtpData(email, normalizedPurpose);
+
+    if (!otpData) {
+      return {
+        success: false,
+        message: "OTP not found",
+        status: STATUS.NOT_FOUND,
+      };
+    }
+
+    if (otpData.expiresAt < new Date()) {
+      return {
+        success: false,
+        message: "OTP expired",
+        status: STATUS.BAD_REQUEST,
+      };
+    }
+    const valid = await bcrypt.compare(otp, otpData.otp);
+    if (!valid) {
+      return {
+        success: false,
+        message: "Invalid OTP",
+        status: STATUS.BAD_REQUEST,
+      };
+    }
+
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      return {
+        success: false,
+        message: "User not found",
+        status: STATUS.NOT_FOUND,
+      };
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await User.update({ password: hashedPassword }, { where: { email } });
+
+    otpData.isUsed = true;
+    await otpData.save();
+
+    return {
+      success: true,
+      message: "Password reset successfully",
+      status: STATUS.OK,
+    };
+  } catch (error) {
+    throw new ExpressError(STATUS.BAD_REQUEST, error.message);
+  }
+};
+
+export const resendOtpService = async (email, purpose) => {
+  try {
+    const normalizedPurpose = (purpose || "FORGOT_PASSWORD").toUpperCase();
+
+    if (!email) {
+      return {
+        success: false,
+        message: "Email is required",
+        status: STATUS.BAD_REQUEST,
+      };
+    }
+
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      return {
+        success: false,
+        message: "User not found",
+        status: STATUS.NOT_FOUND,
+      };
+    }
+
+    const otp = generateOtp();
+    await createOTP(email, otp, normalizedPurpose);
+
+    return {
+      success: true,
+      message: "OTP resent to your email",
+      status: STATUS.OK,
+    };
+  } catch (error) {
+    throw new ExpressError(STATUS.BAD_REQUEST, error.message);
+  }
+};
