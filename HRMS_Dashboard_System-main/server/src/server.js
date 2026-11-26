@@ -1,17 +1,16 @@
-import app from "./app.js";
-import { connectDB } from "./config/db.js";
-import { env } from "./config/env.js";
-import http from "http";
-import { Server } from "socket.io";
 import cookie from "cookie";
+import http from "http";
 import jwt from "jsonwebtoken";
-import { syncDB } from "./config/db.js";
+import { Server } from "socket.io";
+import app from "./app.js";
+import { connectDB, syncDB } from "./config/db.js";
+import { env } from "./config/env.js";
+import { Salary, Payroll } from "./models/Associations.model.js";
 import {
   getAdminRoom,
   getManagerRoom,
   getUserRoom,
 } from "./utils/socketRooms.utils.js";
-import "./models/Associations.model.js";
 
 const server = http.createServer(app);
 
@@ -75,7 +74,16 @@ io.on("connection", (socket) => {
 
 const startServer = async () => {
   await connectDB();
-  // await syncDB();
+
+  try {
+    await Salary.sync();
+    await Payroll.sync();
+
+    console.log("Salary and Payroll tables created successfully");
+  } catch (error) {
+    console.error("Payroll table creation failed:", error.message);
+    process.exit(1);
+  }
 
   server.listen(env.port, () => {
     console.log(`Server listening on port ${env.port}`);

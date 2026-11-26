@@ -1,3 +1,7 @@
+
+import MyPayslips from "./pages/Payroll/MyPayslips";
+import PayrollManagement from "./pages/AdminPages/Payroll/PayrollManagement";
+import SalaryManagement from "./pages/AdminPages/Payroll/SalaryManagement";
 import UserLayoutPage from "./pages/UserPages/UserLayoutPage";
 import AdminUserPage from "./pages/AdminPages/User/AdminUserPage";
 import AdminDepartmentPage from "./pages/AdminPages/Department/AdminDepartmentPage";
@@ -19,27 +23,32 @@ import "@fontsource/roboto/300.css";
 import "@fontsource/roboto/400.css";
 import "@fontsource/roboto/500.css";
 import "@fontsource/roboto/700.css";
+
 import AdminAsset from "./pages/AdminPages/AssetPage/AdminAsset";
 import UserExpensePage from "./pages/UserPages/UserExpensePage";
 import ManagerExpensesPage from "./pages/ManagerPages/Expense/ManagerExpenses";
 import ManagerLayout from "./pages/ManagerPages/ManagerLayoutPage";
 import ManagerUserPage from "./pages/ManagerPages/User/ManagerUserPage";
 import ManagerAssetRequest from "./pages/ManagerPages/AssetPage/ManagerRequest";
+
 import { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchUser } from "./redux/auth/authThunk";
 import { socket } from "./socket";
+
 import AttendancePolicy from "./pages/AdminPages/Attendance/AttendancePolicy";
 import AttendanceTable from "./pages/AdminPages/Attendance/AttendanceDataPage";
 import AttendanceData from "./pages/ManagerPages/Attendance/AttendanceRequestPage";
 import UserAttendanceData from "./pages/UserPages/AttendanceData";
 import ManagerAttendancePage from "./pages/ManagerPages/Attendance/ManagerAttendancePage";
+
 import LeaveManagement from "./pages/UserPages/LeaveManagementPage";
 import ManagerLeaveManagement from "./pages/ManagerPages/LeaveManagement/ManagerLeaveManagement";
 import ManagerLeaveDashboard from "./pages/ManagerPages/LeaveManagement/ManagerLeaveDashboard";
 import AdminLeaveDashboard from "./pages/AdminPages/LeaveManagement/AdminLeaveDashboard";
 import AdminLeavePolicyPage from "./pages/AdminPages/LeaveManagement/LeavePolicyPage";
 import LeaveTypePage from "./pages/AdminPages/LeaveManagement/LeaveTypePage";
+
 import CareersPage from "./pages/CareerPages/CareerPage";
 import JobDetailPage from "./pages/CareerPages/JobDetailPage";
 import JobApplicationPage from "./pages/CareerPages/JobApplicationPage";
@@ -48,6 +57,7 @@ import AdminRequisitionPage from "./pages/AdminPages/Recruitment/AdminRequistion
 import AdminJobPostsPage from "./pages/AdminPages/Recruitment/AdminJobPostsPage";
 import AdminJobApplicationsPage from "./pages/AdminPages/Recruitment/JobApplicationPage";
 import ManagerInterviewsPage from "./pages/ManagerPages/JobRecruitment/interviewPage";
+
 import { OfferPage } from "./pages/CareerPages/OfferPage";
 import OrganizationRegisterPage from "./pages/organization/OrganizationRegisterPage";
 import ForgotPasswordPage from "./pages/Auth/ForgotPasswordPage";
@@ -58,8 +68,10 @@ import AdminSubscriptionThankYouPage from "./pages/AdminPages/Subscription/Admin
 function App() {
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.auth);
+
   useEffect(() => {
     const pathname = window.location.pathname;
+
     const isPublicRoute =
       pathname === "/" ||
       pathname === "/login" ||
@@ -89,85 +101,239 @@ function App() {
     <>
       <BrowserRouter>
         <Routes>
-          {/* <Route path="/signup" element={<SignUpPage />} /> */}
+
+          {/* ============================= */}
+          {/* PUBLIC ROUTES */}
+          {/* ============================= */}
+
           <Route
             path="/organization/register"
             element={<OrganizationRegisterPage />}
           />
+
           <Route path="/login" element={<LogInPage />} />
-          <Route path="/forgot" element={<ForgotPasswordPage />} />
+
+          <Route
+            path="/forgot"
+            element={<ForgotPasswordPage />}
+          />
+
+          {/* ============================= */}
+          {/* EMPLOYEE ROUTES */}
+          {/* ============================= */}
+
           <Route path="/user" element={<UserLayoutPage />}>
+<Route path="payslips" element={<MyPayslips />} />
+
             <Route path="dashboard" element={<Dashboard />} />
-            <Route path="asset" element={<UserAssetPage />}></Route>
-            <Route path="expense" element={<UserExpensePage />}></Route>
-            <Route path="attendance" element={<UserAttendanceData />}></Route>
-            <Route path="leave-management" element={<LeaveManagement />} />
+
+            <Route path="asset" element={<UserAssetPage />} />
+
+            <Route path="expense" element={<UserExpensePage />} />
+
+            <Route
+              path="attendance"
+              element={<UserAttendanceData />}
+            />
+
+            <Route
+              path="leave-management"
+              element={<LeaveManagement />}
+            />
+
+            {/* Employee Payslips - NEW */}
+            <Route
+              path="payslips"
+              element={<MyPayslips />}
+            />
+
             <Route path="profile" element={<ProfilePage />} />
+
           </Route>
 
+          {/* ============================= */}
+          {/* HR ADMIN ROUTES */}
+          {/* ============================= */}
+
           <Route path="/admin" element={<AdminLayoutPage />}>
+
+            <Route
+              path="salary"
+              element={<SalaryManagement />}
+            />
+
+            <Route
+              path="payroll"
+              element={<PayrollManagement />}
+            />
+
             <Route path="dashboard" element={<AdminUserPage />} />
+
             <Route path="ips" element={<AdminIps />} />
+
             <Route path="requests" element={<AdminRequest />} />
+
             <Route path="asset" element={<AdminAsset />} />
+
             <Route path="expenses" element={<ExpensesPage />} />
+
             <Route path="manager" element={<ManagerPage />} />
-            <Route path="departments" element={<AdminDepartmentPage />} />
-            <Route path="attendance-policy" element={<AttendancePolicy />} />
-            <Route path="attendance" element={<AttendanceTable />} />
-            <Route path="leave-requests" element={<AdminLeaveDashboard />} />
-            <Route path="leave-policy" element={<AdminLeavePolicyPage />} />
-            <Route path="leave-type" element={<LeaveTypePage />} />
-            <Route path="job-requisition" element={<AdminRequisitionPage />} />
-            <Route path="job-posts" element={<AdminJobPostsPage />} />
+
+            <Route
+              path="departments"
+              element={<AdminDepartmentPage />}
+            />
+
+            <Route
+              path="attendance-policy"
+              element={<AttendancePolicy />}
+            />
+
+            <Route
+              path="attendance"
+              element={<AttendanceTable />}
+            />
+
+            <Route
+              path="leave-requests"
+              element={<AdminLeaveDashboard />}
+            />
+
+            <Route
+              path="leave-policy"
+              element={<AdminLeavePolicyPage />}
+            />
+
+            <Route
+              path="leave-type"
+              element={<LeaveTypePage />}
+            />
+
+            <Route
+              path="job-requisition"
+              element={<AdminRequisitionPage />}
+            />
+
+            <Route
+              path="job-posts"
+              element={<AdminJobPostsPage />}
+            />
+
             <Route
               path="job-applications"
               element={<AdminJobApplicationsPage />}
             />
+
             <Route path="profile" element={<ProfilePage />} />
+
             <Route
               path="subscription/payment"
               element={<AdminSubscriptionPaymentPage />}
             />
+
             <Route
               path="subscription/thank-you"
               element={<AdminSubscriptionThankYouPage />}
             />
+
           </Route>
 
+          {/* ============================= */}
+          {/* MANAGER ROUTES */}
+          {/* ============================= */}
+
           <Route path="/manager" element={<ManagerLayout />}>
+<Route path="payslips" element={<MyPayslips />} />
+
             <Route path="dashboard" element={<Dashboard />} />
+
             <Route path="assets" element={<ManagerAsset />} />
+
             <Route path="users" element={<ManagerUserPage />} />
-            <Route path="requests" element={<ManagerAssetRequest />} />
-            <Route path="attendance/request" element={<AttendanceData />} />
-            <Route path="attendance/me" element={<ManagerAttendancePage />} />
-            <Route path="expenses" element={<ManagerExpensesPage />} />
-            <Route path="leave-requests" element={<ManagerLeaveDashboard />} />
+
+            <Route
+              path="requests"
+              element={<ManagerAssetRequest />}
+            />
+
+            <Route
+              path="attendance/request"
+              element={<AttendanceData />}
+            />
+
+            <Route
+              path="attendance/me"
+              element={<ManagerAttendancePage />}
+            />
+
+            <Route
+              path="expenses"
+              element={<ManagerExpensesPage />}
+            />
+
+            <Route
+              path="leave-requests"
+              element={<ManagerLeaveDashboard />}
+            />
+
             <Route
               path="job-requisition"
               element={<ManagerRequisitionPage />}
             />
+
             <Route
               path="leave/management"
               element={<ManagerLeaveManagement />}
             />
-            <Route path="interviews" element={<ManagerInterviewsPage />} />
+
+            <Route
+              path="interviews"
+              element={<ManagerInterviewsPage />}
+            />
+
+            {/* Manager Payslips - NEW */}
+            <Route
+              path="payslips"
+              element={<MyPayslips />}
+            />
+
             <Route path="profile" element={<ProfilePage />} />
+
           </Route>
 
-          <Route path="/offer/:token" element={<OfferPage />} />
+          {/* ============================= */}
+          {/* CAREER AND OFFER ROUTES */}
+          {/* ============================= */}
 
-          <Route path="/careers" element={<CareersPage />}></Route>
-          <Route path="/careers/:orgSlug/:slug" element={<JobDetailPage />} />
+          <Route
+            path="/offer/:token"
+            element={<OfferPage />}
+          />
+
+          <Route
+            path="/careers"
+            element={<CareersPage />}
+          />
+
+          <Route
+            path="/careers/:orgSlug/:slug"
+            element={<JobDetailPage />}
+          />
+
           <Route
             path="/careers/:orgSlug/:slug/apply"
             element={<JobApplicationPage />}
           />
 
-          <Route path="/" element={<LogInPage />}></Route>
+          {/* DEFAULT ROUTE */}
 
-          <Route path="*" element={<div>404 Not Found</div>} />
+          <Route path="/" element={<LogInPage />} />
+
+          <Route
+            path="*"
+            element={<div>404 Not Found</div>}
+          />
+
         </Routes>
       </BrowserRouter>
 

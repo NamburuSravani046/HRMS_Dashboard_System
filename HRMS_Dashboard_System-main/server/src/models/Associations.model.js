@@ -38,6 +38,8 @@ import Subscription from "./Subscription/Subscription.model.js";
 import Plans from "./Subscription/Plan.model.js";
 import Payment from "./Payment/Payment.model.js";
 import Profile from "./Profile/Profile.model.js";
+import Salary from "./PayrollModels/Salary.model.js";
+import Payroll from "./PayrollModels/Payroll.model.js";
 
 import "./associations/organization.associations.js";
 import "./associations/user.associations.js";
@@ -89,4 +91,6 @@ export {
   Plans,
   Payment,
   Profile,
+  Salary,
+  Payroll,
 };

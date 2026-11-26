@@ -1,64 +1,28 @@
+
+import { useState } from "react";
+import { useSelector } from "react-redux";
+import { Navigate, Outlet } from "react-router-dom";
 import Sidebar from "../../components/AdminDashboard/SideBar";
 import Topbar from "../../components/TopBar";
-import { Outlet } from "react-router-dom";
-import { useSelector } from "react-redux";
-import { useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
-import { useLocation } from "react-router-dom";
-import { getCurrentSubscription } from "../../services/SubscriptionService/subscriptionDetailsService";
 
 export default function AdminLayout() {
   const [open, setOpen] = useState(false);
-  const [subscriptionChecked, setSubscriptionChecked] = useState(false);
 
   const { user, loading } = useSelector((state) => state.auth);
-  const navigate = useNavigate();
-  const location = useLocation();
 
-  useEffect(() => {
-    if (!loading && user?.role !== "admin") {
-      navigate("/login");
-    }
-  }, [user, loading, navigate]);
-
-  useEffect(() => {
-    const checkSubscription = async () => {
-      if (loading || user?.role !== "admin") return;
-
-      const allowedWithoutSubscription = [
-        "/admin/profile",
-        "/admin/subscription/payment",
-        "/admin/subscription/thank-you",
-      ];
-
-      const response = await getCurrentSubscription();
-      const hasSubscription = response?.success;
-
-      if (!hasSubscription && !allowedWithoutSubscription.includes(location.pathname)) {
-        navigate("/admin/subscription/payment");
-        return;
-      }
-
-      setSubscriptionChecked(true);
-    };
-
-    checkSubscription();
-  }, [loading, user?.role, location.pathname, navigate]);
-
+  // Wait until authentication is checked
   if (loading) {
     return <div>Loading...</div>;
   }
 
-  if (user?.role !== "admin") {
-    return null;
+  // Only Admin users can access Admin pages
+  if (!user || user.role !== "admin") {
+    return <Navigate to="/login" replace />;
   }
 
-  if (!subscriptionChecked) {
-    return <div>Loading...</div>;
-  }
-
+  // Free HRMS demo: no subscription verification required
   return (
-    <div className="flex h-[96vh]  relative">
+    <div className="flex h-[96vh] relative">
       {open && (
         <div
           onClick={() => setOpen(false)}
@@ -70,6 +34,7 @@ export default function AdminLayout() {
 
       <div className="flex flex-col flex-1 overflow-hidden">
         <Topbar open={open} setOpen={setOpen} />
+
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>

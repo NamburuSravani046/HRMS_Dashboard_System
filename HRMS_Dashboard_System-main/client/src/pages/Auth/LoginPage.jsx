@@ -1,5 +1,5 @@
-import { useState } from "react";
 
+import { useState } from "react";
 import { useNavigate, Link as RouterLink } from "react-router-dom";
 import {
   Box,
@@ -17,7 +17,6 @@ import Hero from "../../components/Hero/Hero";
 import { useDispatch } from "react-redux";
 import { loginUser } from "../../redux/auth/authThunk";
 import { verify } from "../../services/AuthService/authService";
-import { getCurrentSubscription } from "../../services/SubscriptionService/subscriptionDetailsService";
 
 function LoginPage() {
   const [formData, setFormData] = useState({
@@ -26,42 +25,37 @@ function LoginPage() {
   });
 
   const [credentials, setCredentials] = useState(true);
-
   const [otp, setOtp] = useState("");
 
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
+  // Free HRMS demo: no subscription payment required for login
   const handlePostLogin = async (response) => {
     const role = response?.user?.role;
 
     if (role === "admin") {
-      const subscriptionRes = await getCurrentSubscription();
-      if (subscriptionRes?.success) {
-        toast.success(response.message || "Welcome");
-        navigate("/admin/dashboard");
-      } else {
-        toast.info("Please choose a subscription plan to continue.");
-        navigate("/admin/subscription/payment");
-      }
+      toast.success(response.message || "Welcome Admin");
+      navigate("/admin/dashboard", { replace: true });
       resetData();
       return;
     }
 
     if (role === "manager") {
-      toast.success(response.message || "Welcome");
-      navigate("/manager/dashboard");
+      toast.success(response.message || "Welcome Manager");
+      navigate("/manager/dashboard", { replace: true });
       resetData();
       return;
     }
 
     if (role === "employee" || role === "user") {
-      toast.success(response.message || "Welcome");
-      navigate("/user/dashboard");
+      toast.success(response.message || "Welcome Employee");
+      navigate("/user/dashboard", { replace: true });
       resetData();
       return;
     }
 
+    toast.error("Unknown user role");
     navigate("/login");
     resetData();
   };
@@ -69,6 +63,7 @@ function LoginPage() {
   const handleChange = (e) => {
     setOtp("");
     setCredentials(true);
+
     setFormData((prev) => ({
       ...prev,
       [e.target.name]: e.target.value,
@@ -80,7 +75,6 @@ function LoginPage() {
 
     if (!formData.email || !formData.password) {
       toast.error("All details required");
-      setFormData({ email: "", password: "" });
       return;
     }
 
@@ -96,44 +90,59 @@ function LoginPage() {
       if (response?.success) {
         await handlePostLogin(response);
       } else {
-        toast.error(response?.message);
-        resetData();
+        toast.error(response?.message || "Login failed");
       }
     } catch (error) {
       console.error("Login error:", error);
-      toast.error(error?.message);
-      resetData();
+      toast.error(error?.message || "Login failed");
     }
   };
 
   const handleVerification = async (e) => {
     e.preventDefault();
 
+    if (!otp.trim()) {
+      toast.error("Please enter the OTP");
+      return;
+    }
+
     try {
-      let response = await verify({
+      const response = await verify({
         email: formData.email,
         otp: otp,
         purpose: "LOGIN",
       });
-      if (response.success) {
-        toast.success(response.message);
+
+      if (response?.success) {
+        toast.success(response.message || "Account verified");
 
         setCredentials(true);
+
         const res = await dispatch(loginUser(formData)).unwrap();
-        setFormData({ email: "", password: "" });
-        setOtp("");
-        await handlePostLogin(res);
+
+        if (res?.success && res?.user?.isVerified !== false) {
+          await handlePostLogin(res);
+        } else {
+          toast.info("Please sign in again");
+          resetData();
+        }
       } else {
-        toast.error(response.message);
+        toast.error(response?.message || "Invalid OTP");
       }
     } catch (error) {
-      toast.error(error.response.data.message);
+      console.error("Verification error:", error);
+      toast.error(
+        error?.response?.data?.message ||
+          error?.message ||
+          "OTP verification failed"
+      );
     }
   };
 
   const resetData = () => {
     setFormData({ email: "", password: "" });
     setOtp("");
+    setCredentials(true);
   };
 
   return (
@@ -174,6 +183,7 @@ function LoginPage() {
               Careers
             </Typography>
           </Box>
+
           <Paper
             elevation={0}
             sx={{
@@ -203,7 +213,9 @@ function LoginPage() {
             <Box
               noValidate
               component="form"
-              onSubmit={credentials ? handleSubmit : handleVerification}
+              onSubmit={
+                credentials ? handleSubmit : handleVerification
+              }
               sx={{ mt: 3 }}
             >
               <TextField
@@ -228,14 +240,12 @@ function LoginPage() {
                 onChange={handleChange}
               />
 
-              {credentials ? (
-                ""
-              ) : (
+              {!credentials && (
                 <TextField
                   fullWidth
-                  label="otp"
+                  label="OTP"
                   name="otp"
-                  type="otp"
+                  type="text"
                   margin="normal"
                   required
                   value={otp}
@@ -251,7 +261,10 @@ function LoginPage() {
                   mt: 1,
                 }}
               >
-                <FormControlLabel control={<Checkbox />} label="Remember me" />
+                <FormControlLabel
+                  control={<Checkbox />}
+                  label="Remember me"
+                />
 
                 <Link
                   component={RouterLink}
@@ -267,12 +280,17 @@ function LoginPage() {
                 type="submit"
                 fullWidth
                 variant="contained"
-                sx={{ mt: 3, py: 1.2, borderRadius: 2 }}
+                sx={{
+                  mt: 3,
+                  py: 1.2,
+                  borderRadius: 2,
+                }}
               >
-                {credentials ? <h1>Sign In</h1> : <h1>Verify</h1>}
+                {credentials ? "Sign In" : "Verify"}
               </Button>
             </Box>
           </Paper>
+
           <Hero />
         </Box>
       </div>

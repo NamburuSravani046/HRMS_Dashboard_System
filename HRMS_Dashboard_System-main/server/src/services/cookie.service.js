@@ -1,34 +1,29 @@
-export const setCookie = (res, name, value) => {
+
+const getCookieOptions = () => {
   const isProd = process.env.NODE_ENV === "production";
 
-  res.cookie(name, value, {
+  return {
     httpOnly: true,
-    secure: true,
-    sameSite: "None",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
     path: "/",
+  };
+};
+
+export const setCookie = (res, name, value) => {
+  res.cookie(name, value, {
+    ...getCookieOptions(),
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 };
 
 export const clearCookie = (res, name) => {
-  const isProd = process.env.NODE_ENV === "production";
-
-  res.clearCookie(name, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "None",
-    path: "/",
-  });
+  res.clearCookie(name, getCookieOptions());
 };
 
 export const setAccessTokenCookie = (res, name, value) => {
-  const isProd = process.env.NODE_ENV === "production";
-
   res.cookie(name, value, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "None",
+    ...getCookieOptions(),
     maxAge: 15 * 60 * 1000,
-    path: "/",
   });
 };

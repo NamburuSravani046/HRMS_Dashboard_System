@@ -1,20 +1,20 @@
+import { sequelize } from "../../config/db.js";
+import { sendMail } from "../../config/otpService.js";
 import {
+  Application,
+  ApplicationStageLog,
+  Candidate,
+  HiringStage,
   Interview,
   InterviewAuditLog,
   InterviewFeedback,
-  Application,
-  ApplicationStageLog,
-  HiringStage,
-  Candidate,
   JobPosting,
 } from "../../models/Associations.model.js";
-import { sequelize } from "../../config/db.js";
 import {
   interviewRejectionEmailTemplate,
   nextRoundSelectedEmailTemplate,
 } from "../../utils/mailTemplate.utils.js";
-import { sendMail } from "../../config/otpService.js";
-import { act } from "react";
+
 
 export const createInterviewFeedback = async (interviewId, data, userId) => {
   const transaction = await sequelize.transaction();

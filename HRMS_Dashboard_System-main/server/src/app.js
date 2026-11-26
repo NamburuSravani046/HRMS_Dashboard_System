@@ -1,3 +1,4 @@
+import { payrollRouter } from "./routes/payrollRoutes/payroll.routes.js";
 import express from "express";
 import cookieParser from "cookie-parser";
 import { authRouter } from "./routes/authRoutes/auth.routes.js";
@@ -72,6 +73,8 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use("/payment", PaymentRouter);
 
 app.use("/subscription", subscriptionRouter);
+
+app.use("/payroll", payrollRouter);
 
 app.use(globalErrorHandler);
 

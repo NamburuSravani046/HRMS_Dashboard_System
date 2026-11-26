@@ -1,124 +1,245 @@
+
 import {
+  Badge,
   Box,
-  Tabs,
-  Tab,
+  Button,
   Card,
   CardContent,
-  Typography,
-  Button,
-  Collapse,
   Checkbox,
+  Collapse,
   Dialog,
-  DialogTitle,
-  DialogContent,
   DialogActions,
-  TextField,
-  Pagination,
+  DialogContent,
+  DialogTitle,
   FormControl,
-  Select,
-  MenuItem,
   InputLabel,
+  MenuItem,
+  Pagination,
+  Select,
+  Tab,
+  Tabs,
+  TextField,
+  Typography,
 } from "@mui/material";
-import { useState } from "react";
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
+
 import { toast } from "react-toastify";
-import { Badge } from "@mui/material";
+
 import {
-  getAllManagerLeaveRequests,
   approveLeaveRequest,
+  getAllManagerLeaveRequests,
   rejectLeaveRequest,
 } from "../../../services/AdminService/leaveService";
 
+const formatDate = (value) =>
+  value
+    ? new Date(value).toLocaleDateString("en-GB")
+    : "N/A";
+
 export default function AdminLeaveDashboard() {
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(1);
   const [expandedId, setExpandedId] = useState(null);
   const [selected, setSelected] = useState([]);
   const [rejectDialog, setRejectDialog] = useState(false);
-  const [remark, setRemark] = useState("");
   const [rejectId, setRejectId] = useState(null);
+  const [remark, setRemark] = useState("");
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter] = useState("all");
+
   const [dataFilter, setDataFilter] = useState("all");
   const [totalPages, setTotalPages] = useState(1);
-
   const [leaves, setLeaves] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
-  const pendingCount = leaves.filter((l) => l.status === "pending").length;
+  const queryStatus =
+    tab === 0
+      ? dataFilter === "all"
+        ? "all"
+        : dataFilter.toUpperCase()
+      : statusFilter === "all"
+        ? "PENDING"
+        : statusFilter.toUpperCase();
 
-  const getLeaves = async () => {
+  // ====================================
+  // GET LEAVE REQUESTS
+  // ====================================
+
+  const getLeaves = useCallback(async () => {
+    setLoading(true);
+
     try {
-      let status;
-
-      if (tab === 0) {
-        status = dataFilter === "all" ? "all" : dataFilter.toUpperCase();
-      } else {
-        status =
-          statusFilter === "all" ? "PENDING" : statusFilter.toUpperCase();
-      }
-
       const response = await getAllManagerLeaveRequests({
         page,
         limit: 10,
-        status,
+        status: queryStatus,
       });
 
-      if (response.success) {
-        const formatted = response.data.map((item) => ({
-          id: item.id,
-          userName: item.employee?.first_name || item.employee?.email || "N/A",
-          leaveType: item.LeaveType?.name || "N/A",
-          startDate: new Date(item.startDate).toLocaleDateString(),
-          endDate: new Date(item.endDate).toLocaleDateString(),
-          appliedOn: new Date(item.createdAt).toLocaleDateString(),
-          daysRequested: item.daysRequested,
-          reason: item.reason,
-          status: item.status.toLowerCase(),
-        }));
-
-        setLeaves(formatted);
-        setTotalPages(response.totalPages);
-      } else {
-        toast.error(response.message);
+      if (!response.success) {
+        toast.error(
+          response.message || "Could not fetch leave requests"
+        );
+        return;
       }
+
+      const rows = Array.isArray(response.data)
+        ? response.data
+        : [];
+
+      const formatted = rows.map((item) => ({
+        id: item.id,
+        userName:
+          item.employee?.first_name ||
+          item.employee?.email ||
+          "N/A",
+        leaveType: item.LeaveType?.name || "N/A",
+        startDate: formatDate(item.startDate),
+        endDate: formatDate(item.endDate),
+        appliedOn: formatDate(item.createdAt),
+        daysRequested: item.daysRequested,
+        reason: item.reason,
+        status: String(item.status || "").toLowerCase(),
+      }));
+
+      setLeaves(formatted);
+      setTotalPages(
+        Math.max(1, Number(response.totalPages) || 1)
+      );
+      setSelected([]);
     } catch (error) {
-      toast.error(error.message);
+      toast.error(
+        error.message || "Could not load leave requests"
+      );
+    } finally {
+      setLoading(false);
     }
+  }, [page, queryStatus]);
+
+  useEffect(() => {
+    getLeaves();
+  }, [getLeaves]);
+
+  // ====================================
+  // TAB CHANGE
+  // ====================================
+
+  const changeTab = (_event, value) => {
+    setTab(value);
+    setPage(1);
+    setSelected([]);
+    setExpandedId(null);
   };
 
-  const handleExpand = (id) => {
-    setExpandedId(expandedId === id ? null : id);
-  };
+  // ====================================
+  // SELECT LEAVE REQUEST
+  // ====================================
 
   const handleSelect = (id) => {
     setSelected((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+      prev.includes(id)
+        ? prev.filter((item) => item !== id)
+        : [...prev, id]
     );
   };
 
+  // ====================================
+  // APPROVE SINGLE LEAVE
+  // ====================================
+
   const handleApprove = async (id) => {
+    setProcessing(true);
+
     try {
       const response = await approveLeaveRequest(id);
 
-      if (response.success) {
-        toast.success(response.message);
-        getLeaves();
-      } else {
-        toast.error(response.message);
+      if (!response.success) {
+        toast.error(response.message || "Approval failed");
+        return;
       }
+
+      toast.success(response.message || "Leave approved");
+      setExpandedId(null);
+
+      await getLeaves();
     } catch (error) {
-      toast.error(error.message);
+      toast.error(error.message || "Approval failed");
+    } finally {
+      setProcessing(false);
     }
   };
 
-  const handleBulkAction = (type) => {
-    console.log("Bulk", type, selected);
-    setSelected([]);
+  // ====================================
+  // APPROVE ALL SELECTED LEAVES
+  // ====================================
+
+  const handleBulkApprove = async () => {
+    const ids = selected.filter((id) =>
+      leaves.some(
+        (leave) =>
+          leave.id === id && leave.status === "pending"
+      )
+    );
+
+    if (!ids.length) {
+      toast.error("Select at least one pending request");
+      return;
+    }
+
+    setProcessing(true);
+
+    let approved = 0;
+    const failures = [];
+
+    try {
+      for (const id of ids) {
+        try {
+          const response = await approveLeaveRequest(id);
+
+          if (response.success) {
+            approved += 1;
+          } else {
+            failures.push(
+              response.message || `Could not approve ${id}`
+            );
+          }
+        } catch (error) {
+          failures.push(
+            error.message || `Could not approve ${id}`
+          );
+        }
+      }
+
+      if (approved > 0) {
+        toast.success(
+          `${approved} leave request(s) approved`
+        );
+      }
+
+      if (failures.length > 0) {
+        toast.error(
+          `${failures.length} failed: ${failures[0]}`
+        );
+      }
+
+      await getLeaves();
+    } finally {
+      setProcessing(false);
+    }
   };
+
+  // ====================================
+  // OPEN REJECTION DIALOG
+  // ====================================
 
   const handleRejectOpen = (id) => {
     setRejectId(id);
+    setRemark("");
     setRejectDialog(true);
   };
+
+  // ====================================
+  // REJECT SINGLE OR MULTIPLE LEAVES
+  // ====================================
 
   const handleRejectSubmit = async () => {
     if (!remark.trim()) {
@@ -126,84 +247,106 @@ export default function AdminLeaveDashboard() {
       return;
     }
 
+    const ids =
+      rejectId === "bulk"
+        ? selected
+        : [rejectId];
+
+    if (!ids.length || !ids[0]) {
+      return;
+    }
+
+    setProcessing(true);
+
+    let rejected = 0;
+    const failures = [];
+
     try {
-      let response;
+      for (const id of ids) {
+        try {
+          const response = await rejectLeaveRequest(
+            id,
+            remark.trim()
+          );
 
-      if (rejectId === "bulk") {
-        const promises = selected.map((id) => rejectLeaveRequest(id, remark));
-
-        await Promise.all(promises);
-
-        toast.success("Selected requests rejected");
-        setSelected([]);
-      } else {
-        response = await rejectLeaveRequest(rejectId, remark);
-
-        if (response.success) {
-          toast.success(response.message);
-        } else {
-          toast.error(response.message);
+          if (response.success) {
+            rejected += 1;
+          } else {
+            failures.push(
+              response.message || `Could not reject ${id}`
+            );
+          }
+        } catch (error) {
+          failures.push(
+            error.message || `Could not reject ${id}`
+          );
         }
       }
 
-      getLeaves();
-      setExpandedId(null);
-    } catch (error) {
-      toast.error(error.message);
-    }
+      if (rejected > 0) {
+        toast.success(
+          `${rejected} leave request(s) rejected`
+        );
+      }
 
-    setRejectDialog(false);
-    setRemark("");
+      if (failures.length > 0) {
+        toast.error(
+          `${failures.length} failed: ${failures[0]}`
+        );
+      }
+
+      setRejectDialog(false);
+      setRemark("");
+      setRejectId(null);
+      setExpandedId(null);
+
+      await getLeaves();
+    } finally {
+      setProcessing(false);
+    }
   };
 
-  const filteredLeaves =
+  // ====================================
+  // FILTER LEAVE REQUESTS
+  // ====================================
+
+  const visibleLeaves =
     tab === 0
-      ? leaves.filter((l) =>
+      ? leaves.filter((leave) =>
           dataFilter === "all"
-            ? l.status !== "pending"
-            : l.status === dataFilter,
+            ? leave.status !== "pending"
+            : leave.status === dataFilter
         )
-      : leaves.filter((l) =>
+      : leaves.filter((leave) =>
           statusFilter === "all"
-            ? l.status === "pending"
-            : l.status === statusFilter,
+            ? leave.status === "pending"
+            : leave.status === statusFilter
         );
 
-  useEffect(() => {
-    setExpandedId(null);
-    setSelected([]);
-    setPage(1);
-  }, [tab]);
-
-  useEffect(() => {
-    getLeaves();
-  }, []);
-
-  useEffect(() => {
-    getLeaves();
-  }, [page, tab, statusFilter, dataFilter]);
+  const pendingCount =
+    tab === 1
+      ? visibleLeaves.filter(
+          (leave) => leave.status === "pending"
+        ).length
+      : 0;
 
   return (
     <Box p={1}>
+      {/* TABS */}
+
       <Tabs
         value={tab}
-        onChange={(e, v) => setTab(v)}
+        onChange={changeTab}
         variant="scrollable"
         scrollButtons="auto"
       >
         <Tab label="Leave Data" />
+
         <Tab
           label={
             <Badge
               badgeContent={pendingCount}
               color="error"
-              sx={{
-                "& .MuiBadge-badge": {
-                  fontSize: 10,
-                  minWidth: 18,
-                  height: 18,
-                },
-              }}
             >
               Leave Requests
             </Badge>
@@ -211,23 +354,27 @@ export default function AdminLeaveDashboard() {
         />
       </Tabs>
 
+      {/* BULK ACTION BUTTONS */}
+
       {tab === 1 && selected.length > 0 && (
         <Box
           mt={2}
           display="flex"
-          flexDirection={{ xs: "column", md: "row" }}
-          alignItems={{ xs: "flex-start", md: "center" }}
-          gap={1}
+          flexWrap="wrap"
+          alignItems="center"
           justifyContent="space-between"
+          gap={1}
         >
-          <Typography>{selected.length} selected</Typography>
+          <Typography>
+            {selected.length} selected
+          </Typography>
 
-          <Box>
+          <Box display="flex" gap={1}>
             <Button
               variant="contained"
               color="success"
-              sx={{ mr: 1 }}
-              onClick={() => handleBulkAction("approve")}
+              disabled={processing}
+              onClick={handleBulkApprove}
             >
               Accept All
             </Button>
@@ -235,6 +382,7 @@ export default function AdminLeaveDashboard() {
             <Button
               variant="contained"
               color="error"
+              disabled={processing}
               onClick={() => handleRejectOpen("bulk")}
             >
               Reject All
@@ -243,94 +391,142 @@ export default function AdminLeaveDashboard() {
         </Box>
       )}
 
+      {/* LEAVE DATA FILTER */}
+
       {tab === 0 && (
-        <Box display="flex" justifyContent="flex-end">
-          <FormControl size="small" sx={{ width: 200 }}>
+        <Box
+          display="flex"
+          justifyContent="flex-end"
+          mt={2}
+        >
+          <FormControl
+            size="small"
+            sx={{ width: 200 }}
+          >
             <InputLabel>Status</InputLabel>
+
             <Select
               value={dataFilter}
               label="Status"
-              onChange={(e) => setDataFilter(e.target.value)}
+              onChange={(e) => {
+                setDataFilter(e.target.value);
+                setPage(1);
+              }}
             >
               <MenuItem value="all">All</MenuItem>
-              <MenuItem value="approved">Approved</MenuItem>
-              <MenuItem value="rejected">Rejected</MenuItem>
+              <MenuItem value="approved">
+                Approved
+              </MenuItem>
+              <MenuItem value="rejected">
+                Rejected
+              </MenuItem>
             </Select>
           </FormControl>
         </Box>
       )}
 
-      {/* COLUMN HEADER */}
+      {/* TABLE HEADER */}
+
       <Box
         sx={{
-          display: { xs: "none", md: "flex" },
+          display: {
+            xs: "none",
+            md: "flex",
+          },
           alignItems: "center",
           px: 2,
           py: 1,
           mt: 3,
           borderBottom: "2px solid #e0e0e0",
-          fontWeight: 600,
-          fontSize: 14,
-          color: "#555",
         }}
       >
-        {tab === 1 ? (
-          <>
-            <Typography sx={{ width: "5%" }}>✓</Typography>
-            <Typography sx={{ width: "5%" }}>Sr.</Typography>
-          </>
-        ) : (
-          <Typography sx={{ width: "5%" }}>Sr.</Typography>
+        {tab === 1 && (
+          <Typography sx={{ width: "5%" }}>
+            ✓
+          </Typography>
         )}
+
+        <Typography sx={{ width: "5%" }}>
+          Sr.
+        </Typography>
 
         <Box
           sx={{
             flex: 1,
             display: "flex",
-            justifyContent: "space-between",
           }}
         >
-          <Typography sx={{ width: "20%" }}>Name</Typography>
-          <Typography sx={{ width: "20%" }}>Type</Typography>
-          <Typography sx={{ width: "15%" }}>From</Typography>
-          <Typography sx={{ width: "15%" }}>To</Typography>
-          <Typography sx={{ width: "15%" }}>Status</Typography>
+          <Typography sx={{ width: "24%" }}>
+            Name
+          </Typography>
+
+          <Typography sx={{ width: "24%" }}>
+            Type
+          </Typography>
+
+          <Typography sx={{ width: "18%" }}>
+            From
+          </Typography>
+
+          <Typography sx={{ width: "18%" }}>
+            To
+          </Typography>
+
+          <Typography sx={{ width: "16%" }}>
+            Status
+          </Typography>
         </Box>
       </Box>
 
-      <Box mt={3}>
-        {filteredLeaves.length === 0 ? (
-          <Box
-            display="flex"
-            justifyContent="center"
-            alignItems="center"
-            py={6}
+      {/* LEAVE REQUEST LIST */}
+
+      <Box mt={2}>
+        {loading ? (
+          <Typography
+            textAlign="center"
+            py={5}
+          >
+            Loading leave requests...
+          </Typography>
+        ) : visibleLeaves.length === 0 ? (
+          <Typography
+            textAlign="center"
+            py={5}
             sx={{ opacity: 0.7 }}
           >
-            <Typography fontSize={16} fontWeight={500}>
-              {tab === 0
-                ? "No leave history found"
-                : "No pending leave requests"}
-            </Typography>
-          </Box>
+            {tab === 0
+              ? "No leave history found"
+              : "No pending leave requests"}
+          </Typography>
         ) : (
-          filteredLeaves.map((leave, index) => (
+          visibleLeaves.map((leave, index) => (
             <Card
               key={leave.id}
               sx={{
                 mb: 1,
                 borderRadius: 1.5,
-                backgroundColor: "transparent",
                 boxShadow: "none",
-                transition: "background-color 0.15s ease",
-                "&:hover": {
-                  backgroundColor: "rgba(0,0,0,0.02)",
-                },
+                border: "1px solid #eee",
               }}
             >
-              <CardContent sx={{ p: 0 }}>
+              <CardContent
+                sx={{
+                  p: 0,
+                  "&:last-child": {
+                    pb: 0,
+                  },
+                }}
+              >
+                {/* LEAVE ROW */}
+
                 <Box
-                  onClick={() => handleExpand(leave.id)}
+                  onClick={() =>
+                    setExpandedId((prev) =>
+                      prev === leave.id
+                        ? null
+                        : leave.id
+                    )
+                  }
                   sx={{
                     display: "flex",
                     alignItems: "center",
@@ -339,18 +535,30 @@ export default function AdminLeaveDashboard() {
                     cursor: "pointer",
                   }}
                 >
-                  {tab === 1 && leave.status === "pending" && (
-                    <Checkbox
-                      size="small"
-                      checked={selected.includes(leave.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() => handleSelect(leave.id)}
-                      sx={{ width: "5%" }}
-                    />
-                  )}
+                  {tab === 1 &&
+                    leave.status === "pending" && (
+                      <Checkbox
+                        size="small"
+                        checked={selected.includes(
+                          leave.id
+                        )}
+                        onClick={(event) =>
+                          event.stopPropagation()
+                        }
+                        onChange={() =>
+                          handleSelect(leave.id)
+                        }
+                        disabled={processing}
+                        sx={{ width: "5%" }}
+                      />
+                    )}
 
                   <Typography
-                    sx={{ width: "5%", marginRight: "10px", fontWeight: 600 }}
+                    sx={{
+                      width: "5%",
+                      mr: 1,
+                      fontWeight: 600,
+                    }}
                   >
                     {(page - 1) * 10 + index + 1}
                   </Typography>
@@ -359,105 +567,93 @@ export default function AdminLeaveDashboard() {
                     sx={{
                       flex: 1,
                       display: "flex",
-                      flexDirection: { xs: "column", md: "row" },
-                      gap: { xs: 0.5, md: 0 },
+                      flexDirection: {
+                        xs: "column",
+                        md: "row",
+                      },
+                      gap: {
+                        xs: 1,
+                        md: 0,
+                      },
                     }}
                   >
-                    <Box sx={{ width: { xs: "100%", md: "20%" } }}>
-                      <Typography
-                        sx={{
-                          display: { xs: "block", md: "none" },
-                          fontSize: 12,
-                          color: "#666",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Name
-                      </Typography>
+                    <Typography
+                      sx={{
+                        width: {
+                          xs: "100%",
+                          md: "24%",
+                        },
+                      }}
+                    >
+                      {leave.userName.split("@")[0]}
+                    </Typography>
 
-                      <Typography sx={{ fontWeight: 500 }}>
-                        {leave.userName.split("@")[0]}
-                      </Typography>
-                    </Box>
+                    <Typography
+                      sx={{
+                        width: {
+                          xs: "100%",
+                          md: "24%",
+                        },
+                      }}
+                    >
+                      {leave.leaveType}
+                    </Typography>
 
-                    <Box sx={{ width: { xs: "100%", md: "20%" } }}>
-                      <Typography
-                        sx={{
-                          display: { xs: "block", md: "none" },
-                          fontSize: 12,
-                          color: "#666",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Type
-                      </Typography>
+                    <Typography
+                      sx={{
+                        width: {
+                          xs: "100%",
+                          md: "18%",
+                        },
+                      }}
+                    >
+                      {leave.startDate}
+                    </Typography>
 
-                      <Typography>{leave.leaveType}</Typography>
-                    </Box>
+                    <Typography
+                      sx={{
+                        width: {
+                          xs: "100%",
+                          md: "18%",
+                        },
+                      }}
+                    >
+                      {leave.endDate}
+                    </Typography>
 
-                    <Box sx={{ width: { xs: "100%", md: "15%" } }}>
-                      <Typography
-                        sx={{
-                          display: { xs: "block", md: "none" },
-                          fontSize: 12,
-                          color: "#666",
-                          fontWeight: 600,
-                        }}
-                      >
-                        From
-                      </Typography>
-
-                      <Typography>{leave.startDate}</Typography>
-                    </Box>
-
-                    <Box sx={{ width: { xs: "100%", md: "15%" } }}>
-                      <Typography
-                        sx={{
-                          display: { xs: "block", md: "none" },
-                          fontSize: 12,
-                          color: "#666",
-                          fontWeight: 600,
-                        }}
-                      >
-                        To
-                      </Typography>
-
-                      <Typography>{leave.endDate}</Typography>
-                    </Box>
-
-                    <Box sx={{ width: { xs: "100%", md: "15%" } }}>
-                      <Typography
-                        sx={{
-                          display: { xs: "block", md: "none" },
-                          fontSize: 12,
-                          color: "#666",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Status
-                      </Typography>
-
-                      <Typography
-                        sx={{
-                          fontWeight: 600,
-                          textTransform: "capitalize",
-                          color:
-                            leave.status === "approved"
-                              ? "#2e7d32"
-                              : leave.status === "rejected"
-                                ? "#d32f2f"
-                                : "#ed6c02",
-                        }}
-                      >
-                        {leave.status}
-                      </Typography>
-                    </Box>
+                    <Typography
+                      sx={{
+                        width: {
+                          xs: "100%",
+                          md: "16%",
+                        },
+                        fontWeight: 600,
+                        color:
+                          leave.status === "approved"
+                            ? "success.main"
+                            : leave.status === "rejected"
+                              ? "error.main"
+                              : "warning.main",
+                        textTransform: "capitalize",
+                      }}
+                    >
+                      {leave.status}
+                    </Typography>
                   </Box>
                 </Box>
 
-                {/* EXPANDED SECTION */}
-                <Collapse in={expandedId === leave.id}>
-                  <Box sx={{ px: 3, py: 2, borderTop: "1px solid #eee" }}>
+                {/* EXPANDED LEAVE DETAILS */}
+
+                <Collapse
+                  in={expandedId === leave.id}
+                >
+                  <Box
+                    sx={{
+                      px: 3,
+                      py: 2,
+                      borderTop: "1px solid #eee",
+                    }}
+                  >
                     <Box
                       sx={{
                         display: "grid",
@@ -470,57 +666,103 @@ export default function AdminLeaveDashboard() {
                       }}
                     >
                       <Box>
-                        <Typography fontWeight={600} fontSize={13}>
+                        <Typography
+                          fontWeight={600}
+                          fontSize={13}
+                        >
                           Applied On
                         </Typography>
-                        <Typography fontSize={14}>{leave.appliedOn}</Typography>
+
+                        <Typography>
+                          {leave.appliedOn}
+                        </Typography>
                       </Box>
 
                       <Box>
-                        <Typography fontWeight={600} fontSize={13}>
+                        <Typography
+                          fontWeight={600}
+                          fontSize={13}
+                        >
                           Total Days
                         </Typography>
-                        <Typography fontSize={14}>
+
+                        <Typography>
                           {leave.daysRequested} Days
                         </Typography>
                       </Box>
 
                       <Box>
-                        <Typography fontWeight={600} fontSize={13}>
+                        <Typography
+                          fontWeight={600}
+                          fontSize={13}
+                        >
                           Status
                         </Typography>
-                        <Typography fontSize={14}>{leave.status}</Typography>
+
+                        <Typography
+                          sx={{
+                            textTransform:
+                              "capitalize",
+                          }}
+                        >
+                          {leave.status}
+                        </Typography>
                       </Box>
 
-                      <Box sx={{ gridColumn: "1 / span 3" }}>
-                        <Typography fontWeight={600} fontSize={13}>
+                      <Box
+                        sx={{
+                          gridColumn: {
+                            md: "1 / span 3",
+                          },
+                        }}
+                      >
+                        <Typography
+                          fontWeight={600}
+                          fontSize={13}
+                        >
                           Reason
                         </Typography>
-                        <Typography fontSize={14}>{leave.reason}</Typography>
+
+                        <Typography>
+                          {leave.reason}
+                        </Typography>
                       </Box>
                     </Box>
 
-                    {tab === 1 && leave.status === "pending" && (
-                      <Box mt={2} display="flex" gap={2}>
-                        <Button
-                          variant="contained"
-                          color="success"
-                          size="small"
-                          onClick={() => handleApprove(leave.id)}
-                        >
-                          Accept
-                        </Button>
+                    {/* INDIVIDUAL ACTIONS */}
 
-                        <Button
-                          variant="contained"
-                          color="error"
-                          size="small"
-                          onClick={() => handleRejectOpen(leave.id)}
+                    {tab === 1 &&
+                      leave.status === "pending" && (
+                        <Box
+                          mt={2}
+                          display="flex"
+                          gap={2}
                         >
-                          Reject
-                        </Button>
-                      </Box>
-                    )}
+                          <Button
+                            variant="contained"
+                            color="success"
+                            size="small"
+                            disabled={processing}
+                            onClick={() =>
+                              handleApprove(leave.id)
+                            }
+                          >
+                            Accept
+                          </Button>
+
+                          <Button
+                            variant="contained"
+                            color="error"
+                            size="small"
+                            disabled={processing}
+                            onClick={() =>
+                              handleRejectOpen(leave.id)
+                            }
+                          >
+                            Reject
+                          </Button>
+                        </Box>
+                      )}
                   </Box>
                 </Collapse>
               </CardContent>
@@ -529,29 +771,65 @@ export default function AdminLeaveDashboard() {
         )}
       </Box>
 
-      <Box display="flex" justifyContent="center" mt={3}>
+      {/* PAGINATION */}
+
+      <Box
+        display="flex"
+        justifyContent="center"
+        mt={3}
+      >
         <Pagination
           count={totalPages}
           page={page}
-          onChange={(e, value) => setPage(value)}
+          onChange={(_event, value) =>
+            setPage(value)
+          }
         />
       </Box>
 
-      <Dialog open={rejectDialog} onClose={() => setRejectDialog(false)}>
-        <DialogTitle>Reject Leave</DialogTitle>
+      {/* REJECT DIALOG */}
+
+      <Dialog
+        open={rejectDialog}
+        onClose={() =>
+          !processing && setRejectDialog(false)
+        }
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>
+          Reject Leave
+        </DialogTitle>
+
         <DialogContent>
           <TextField
             fullWidth
             multiline
             rows={3}
+            margin="dense"
             label="Enter Remark"
             value={remark}
-            onChange={(e) => setRemark(e.target.value)}
+            onChange={(event) =>
+              setRemark(event.target.value)
+            }
           />
         </DialogContent>
+
         <DialogActions>
-          <Button onClick={() => setRejectDialog(false)}>Cancel</Button>
-          <Button color="error" onClick={handleRejectSubmit}>
+          <Button
+            disabled={processing}
+            onClick={() =>
+              setRejectDialog(false)
+            }
+          >
+            Cancel
+          </Button>
+
+          <Button
+            disabled={processing}
+            color="error"
+            onClick={handleRejectSubmit}
+          >
             Submit
           </Button>
         </DialogActions>

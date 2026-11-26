@@ -1,33 +1,47 @@
-import ExpressError from "../../utils/Error.utils.js";
-import { Employee, UserIP } from "../../models/Associations.model.js";
+
 import {
-  User,
   AttendancePolicy,
+  Employee,
   Organization,
+  User,
+  UserIP,
 } from "../../models/Associations.model.js";
-import { getPagination } from "../../utils/paginations.utils.js";
-import STATUS from "../../constants/Status.js";
-import { generateHash } from "../../utils/hash.utils.js";
+import ExpressError from "../../utils/Error.utils.js";
+
 import { Op } from "sequelize";
+import { sequelize } from "../../config/db.js";
 import { env } from "../../config/env.js";
 import { sendMail } from "../../config/otpService.js";
-import { sequelize } from "../../config/db.js";
+import STATUS from "../../constants/Status.js";
+import { generateHash } from "../../utils/hash.utils.js";
+import { getPagination } from "../../utils/paginations.utils.js";
+
 import {
-  getScopedWhere,
   getTenantOrGlobalWhere,
   requireTenantId,
 } from "../../utils/tenant.utils.js";
-import { getInviteEmailTemplate } from "../../utils/mailTemplate.utils.js";
-import { join } from "path";
 
-export const getUsersService = async (page, limits, search, adminUser) => {
+import {
+  getInviteEmailTemplate,
+} from "../../utils/mailTemplate.utils.js";
+
+// GET ALL EMPLOYEES
+export const getUsersService = async (
+  page,
+  limits,
+  search,
+  adminUser
+) => {
   try {
     const { limit, offset } = getPagination(page, limits);
     const tenantId = requireTenantId(adminUser);
 
-    let whereCondition = { role: "employee", tenantId };
+    let whereCondition = {
+      role: "employee",
+      tenantId,
+    };
 
-    if (search != "" && search.trim() !== "") {
+    if (search && search.trim() !== "") {
       whereCondition = {
         tenantId,
         role: "employee",
@@ -45,6 +59,7 @@ export const getUsersService = async (page, limits, search, adminUser) => {
       distinct: true,
       col: "id",
       where: whereCondition,
+
       attributes: {
         exclude: [
           "password",
@@ -57,23 +72,32 @@ export const getUsersService = async (page, limits, search, adminUser) => {
           "deletedAt",
         ],
       },
+
       include: [
         {
           model: User,
           as: "manager",
-          attributes: ["id", "email", "first_name", "last_name"],
+          attributes: [
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+          ],
         },
         {
           model: UserIP,
           required: false,
-          attributes: ["ipAddress", "isBlocked", "createdAt", "updatedAt"],
+          attributes: [
+            "ipAddress",
+            "isBlocked",
+            "createdAt",
+            "updatedAt",
+          ],
           limit: 1,
           order: [["createdAt", "DESC"]],
         },
       ],
     });
-
-    const hasNext = page * limit < count;
 
     return {
       success: true,
@@ -83,179 +107,315 @@ export const getUsersService = async (page, limits, search, adminUser) => {
           totalItems: count,
           totalPages: Math.ceil(count / limit),
           currentPage: page,
-          hasNext,
+          hasNext: page * limit < count,
         },
       },
       message: "Users fetched successfully",
+    };
+
+  } catch (error) {
+    throw new ExpressError(400, error.message);
+  }
+};
+
+// BLOCK EMPLOYEE
+export const blockUserService = async (id, adminUser) => {
+  try {
+    const user = await User.findOne({
+      where: {
+        tenantId: adminUser.tenantId,
+        id,
+      },
+    });
+
+    if (!user) {
+      return {
+        success: false,
+        message: "User not found",
+      };
+    }
+
+    if (user.role === "admin") {
+      return {
+        success: false,
+        message: "Cannot block an admin user",
+      };
+    }
+
+    user.isBlocked = true;
+    await user.save();
+
+    return {
+      success: true,
+      message: "User blocked successfully",
     };
   } catch (error) {
     throw new ExpressError(400, error.message);
   }
 };
 
-export const blockUserService = async (id, adminUser) => {
+// UNBLOCK EMPLOYEE
+export const unblockUserService = async (
+  userId,
+  adminUser
+) => {
   try {
     const user = await User.findOne({
-      where: { tenantId: adminUser.tenantId, id },
+      where: {
+        tenantId: adminUser.tenantId,
+        id: userId,
+      },
     });
+
     if (!user) {
-      return { success: false, message: "User not found" };
+      return {
+        success: false,
+        message: "User not found",
+      };
     }
 
-    if (user.role === "admin") {
-      return { success: false, message: "Cannot block an admin user" };
-    }
-    user.isBlocked = true;
-    await user.save();
-    return { success: true, message: "User blocked successfully" };
-  } catch (error) {
-    return new ExpressError(400, error.message);
-  }
-};
-
-export const unblockUserService = async (userId, adminUser) => {
-  try {
-    const user = await User.findOne({
-      where: { tenantId: adminUser.tenantId, id: userId },
-    });
-    if (!user) {
-      return { success: false, message: "User not found" };
-    }
     user.isBlocked = false;
     await user.save();
-    return { success: true, message: "User unblocked successfully" };
+
+    return {
+      success: true,
+      message: "User unblocked successfully",
+    };
+
   } catch (error) {
-    return new ExpressError(400, error.message);
+    throw new ExpressError(400, error.message);
   }
 };
 
+// BLOCK IP
 export const blockIPService = async (ip, adminUser) => {
   try {
     const [updatedCount] = await UserIP.update(
       { isBlocked: true },
-      { where: { tenantId: adminUser.tenantId, ipAddress: ip } },
+      {
+        where: {
+          tenantId: adminUser.tenantId,
+          ipAddress: ip,
+        },
+      }
     );
 
     if (updatedCount === 0) {
-      throw new ExpressError(404, "IP address not found");
+      throw new ExpressError(
+        404,
+        "IP address not found"
+      );
     }
 
     return {
       success: true,
-      message: `IP ${ip} blocked successfully for all users`,
+      message: `IP ${ip} blocked successfully`,
     };
   } catch (error) {
-    return new ExpressError(400, error.message);
+    throw new ExpressError(400, error.message);
   }
 };
 
-export const unblockIPService = async (ip, adminUser) => {
+// UNBLOCK IP
+export const unblockIPService = async (
+  ip,
+  adminUser
+) => {
   try {
     const [updatedCount] = await UserIP.update(
       { isBlocked: false },
-      { where: { tenantId: adminUser.tenantId, ipAddress: ip } },
+      {
+        where: {
+          tenantId: adminUser.tenantId,
+          ipAddress: ip,
+        },
+      }
     );
 
     if (updatedCount === 0) {
-      throw new ExpressError(404, "IP address not found");
+      throw new ExpressError(
+        404,
+        "IP address not found"
+      );
     }
-    return { success: true, message: `IP ${ip} unblocked successfully` };
+
+    return {
+      success: true,
+      message: `IP ${ip} unblocked successfully`,
+    };
   } catch (error) {
-    return new ExpressError(400, error.message);
+    throw new ExpressError(400, error.message);
   }
 };
 
-export const registerUserService = async ({ data }, adminUser) => {
-  const transaction = await sequelize.transaction();
-  try {
-    if (!data.email || !data.password) {
-      return {
-        success: false,
-        message: "All fields are required",
-      };
-    }
+// REGISTER EMPLOYEE
+export const registerUserService = async (
+  { data },
+  adminUser
+) => {
 
+  if (!data?.email || !data?.password) {
+    return {
+      success: false,
+      message: "All fields are required",
+    };
+  }
+
+  if (adminUser?.role !== "admin") {
+    throw new ExpressError(
+      403,
+      "Admin access required"
+    );
+  }
+
+  const demoMode =
+    process.env.NODE_ENV === "development" &&
+    process.env.HRMS_DEMO_MODE === "true";
+
+  const transaction = await sequelize.transaction();
+
+  try {
     const tenantId = requireTenantId(adminUser);
 
     const existingUser = await User.findOne({
-      where: { email: data.email, tenantId },
+      where: {
+        email: data.email,
+        tenantId,
+      },
+      transaction,
     });
 
     if (existingUser) {
-      throw new ExpressError(STATUS.BAD_REQUEST, "User ALready exist");
+      throw new ExpressError(
+        STATUS.BAD_REQUEST,
+        "User already exists"
+      );
     }
-    let hashedPassword = await generateHash(data.password);
 
-    const attendancePolicy = await AttendancePolicy.findOne({
-      where: getTenantOrGlobalWhere(tenantId, { isDefault: true }),
-      order: [["tenantId", "DESC"]],
-    });
-
-    const userData = await User.create(
-      {
-        ...data,
-        tenantId,
-        password: hashedPassword,
-        attendancePolicyId: attendancePolicy?.id || null,
-      },
-      { transaction },
+    const hashedPassword = await generateHash(
+      data.password
     );
 
-    const employee = await Employee.create(
+    const attendancePolicy =
+      await AttendancePolicy.findOne({
+        where: getTenantOrGlobalWhere(
+          tenantId,
+          { isDefault: true }
+        ),
+        order: [["tenantId", "DESC"]],
+        transaction,
+      });
+
+    // CREATE LOGIN ACCOUNT
+    const userData = await User.create(
+      {
+        first_name: data.first_name,
+        last_name: data.last_name,
+        email: data.email,
+        tenantId,
+        password: hashedPassword,
+        role: "employee",
+        isVerified: demoMode,
+        isBlocked: false,
+        attendancePolicyId:
+          attendancePolicy?.id || null,
+      },
+      { transaction }
+    );
+
+    // CREATE EMPLOYEE PROFILE
+    await Employee.create(
       {
         userId: userData.id,
         tenantId,
         departmentId: data.departmentId,
         joiningDate: new Date(),
-        isActive: false,
+        isActive: demoMode,
         role: "employee",
       },
-      { transaction },
-    ); // Pending cause of department dependency
+      { transaction }
+    );
 
-    const organization = await Organization.findOne({
-      where: { id: tenantId },
-      transaction,
-    });
+    // EXTERNAL EMAIL DISABLED IN DEMO MODE
+    if (!demoMode) {
+      const organization =
+        await Organization.findOne({
+          where: { id: tenantId },
+          transaction,
+        });
 
-    const html = getInviteEmailTemplate({
-      name: userData.first_name || userData.email.split("@")[0],
-      role: "employee",
-      companyName: organization?.name || "our organization",
-      inviteLink: env.client_url,
-      password: data.password,
-      email: data.email,
-      password: data.password,
-    });
+      const html = getInviteEmailTemplate({
+        name:
+          userData.first_name ||
+          userData.email.split("@")[0],
+        role: "employee",
+        companyName:
+          organization?.name || "our organization",
+        inviteLink: env.client_url,
+        email: data.email,
+      });
 
-    await sendMail(data.email, "Welcome to the team!", html);
+      await sendMail(
+        data.email,
+        "Welcome to the team!",
+        html
+      );
+    }
 
     await transaction.commit();
 
     return {
       success: true,
-      data: userData,
+      data: {
+        id: userData.id,
+        email: userData.email,
+        role: userData.role,
+        isVerified: userData.isVerified,
+      },
       message: "User Registered Successfully",
     };
+
   } catch (error) {
     await transaction.rollback();
-    throw new ExpressError(STATUS.BAD_REQUEST, error.message);
+
+    throw new ExpressError(
+      STATUS.BAD_REQUEST,
+      error.message
+    );
   }
 };
 
-export const getIPService = async (page, limits, adminUser) => {
+// GET IP DETAILS
+export const getIPService = async (
+  page,
+  limits,
+  adminUser
+) => {
   try {
-    const { limit, offset } = getPagination(page, limits);
-    const where = { tenantId: requireTenantId(adminUser) };
+    const { limit, offset } =
+      getPagination(page, limits);
+
+    const where = {
+      tenantId: requireTenantId(adminUser),
+    };
 
     const [rows, total] = await Promise.all([
       UserIP.findAll({
         where,
         attributes: [
           "ipAddress",
-          [sequelize.fn("MAX", sequelize.col("isBlocked")), "isBlocked"],
           [
-            sequelize.fn("MAX", sequelize.col("failedLogInAttempt")),
+            sequelize.fn(
+              "MAX",
+              sequelize.col("isBlocked")
+            ),
+            "isBlocked",
+          ],
+          [
+            sequelize.fn(
+              "MAX",
+              sequelize.col("failedLogInAttempt")
+            ),
             "failedLogInAttempt",
           ],
         ],
@@ -265,7 +425,12 @@ export const getIPService = async (page, limits, adminUser) => {
         offset,
         limit,
       }),
-      UserIP.count({ where, distinct: true, col: "ipAddress" }),
+
+      UserIP.count({
+        where,
+        distinct: true,
+        col: "ipAddress",
+      }),
     ]);
 
     return {
@@ -273,7 +438,11 @@ export const getIPService = async (page, limits, adminUser) => {
       data: { rows, total },
       message: "IPs fetched successfully",
     };
+
   } catch (error) {
-    throw new ExpressError(STATUS.BAD_REQUEST, error.message);
+    throw new ExpressError(
+      STATUS.BAD_REQUEST,
+      error.message
+    );
   }
 };

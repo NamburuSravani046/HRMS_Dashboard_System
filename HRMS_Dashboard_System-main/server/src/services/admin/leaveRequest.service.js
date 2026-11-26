@@ -1,5 +1,7 @@
+
+import { sequelize } from "../../config/db.js";
+import { sendMail } from "../../config/otpService.js";
 import STATUS from "../../constants/Status.js";
-import ExpressError from "../../utils/Error.utils.js";
 import {
   LeaveAuditLog,
   LeaveBalance,
@@ -7,8 +9,7 @@ import {
   LeaveType,
   User,
 } from "../../models/Associations.model.js";
-import { sequelize } from "../../config/db.js";
-import { sendMail } from "../../config/otpService.js";
+import ExpressError from "../../utils/Error.utils.js";
 import {
   getLeaveApprovedTemplate,
   getLeaveRejectedTemplate,
@@ -18,27 +19,32 @@ import {
   requireTenantId,
 } from "../../utils/tenant.utils.js";
 
+// ========================================
+// APPROVE EMPLOYEE LEAVE REQUEST
+// ========================================
+
 export const approveLeaveRequest = async (id, adminUser) => {
+  const tenantId = requireTenantId(adminUser);
+
   const transaction = await sequelize.transaction();
 
+  let notification = null;
+
   try {
-    const tenantId = requireTenantId(adminUser);
     const leaveData = await LeaveRequest.findOne({
-      where: { id, tenantId },
+      where: {
+        id,
+        tenantId,
+      },
       include: [
-        { model: LeaveAuditLog, as: "auditLogs", required: false },
         {
           model: User,
-          where: { role: "manager", tenantId },
+          where: {
+            role: "employee",
+            tenantId,
+          },
           as: "employee",
           required: true,
-          include: [
-            {
-              model: LeaveBalance,
-              as: "leaveBalances",
-              required: false,
-            },
-          ],
         },
         {
           model: LeaveType,
@@ -46,104 +52,189 @@ export const approveLeaveRequest = async (id, adminUser) => {
           required: true,
         },
       ],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
-    if (!leaveData)
-      throw new ExpressError(STATUS.BAD_REQUEST, "Leave Request Not Found");
-
-   
-
-    if (leaveData.status !== "PENDING" || leaveData.cancelRequest) {
-      return {
-        success: false,
-        message: "You can't approve this request, the action is already done",
-      };
+    if (!leaveData) {
+      throw new ExpressError(
+        STATUS.BAD_REQUEST,
+        "Leave Request Not Found"
+      );
     }
 
+    if (
+      leaveData.status !== "PENDING" ||
+      leaveData.cancelRequest
+    ) {
+      throw new ExpressError(
+        STATUS.BAD_REQUEST,
+        "This leave request is already processed or cancelled"
+      );
+    }
+
+    // Find employee's leave balance
     const leaveBalanceData = await LeaveBalance.findOne({
       where: {
         userId: leaveData.userId,
         leaveTypeId: leaveData.leaveTypeId,
         tenantId,
       },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
-    const remainLeaveDay = leaveBalanceData.balance - leaveData.daysRequested;
-    const used = leaveBalanceData.balance - remainLeaveDay;
+    if (!leaveBalanceData) {
+      throw new ExpressError(
+        STATUS.BAD_REQUEST,
+        "Employee leave balance not found"
+      );
+    }
 
+    const requestedDays = Number(leaveData.daysRequested);
+    const currentBalance = Number(leaveBalanceData.balance);
+    const currentUsed = Number(leaveBalanceData.used || 0);
+
+    if (
+      !Number.isFinite(requestedDays) ||
+      requestedDays <= 0 ||
+      !Number.isFinite(currentBalance) ||
+      currentBalance < requestedDays
+    ) {
+      throw new ExpressError(
+        STATUS.BAD_REQUEST,
+        "Insufficient or invalid leave balance"
+      );
+    }
+
+    const remainingBalance = currentBalance - requestedDays;
+    const updatedUsed = currentUsed + requestedDays;
+
+    // Update leave balance
     await leaveBalanceData.update(
-      { balance: remainLeaveDay, used },
-      { transaction },
+      {
+        balance: remainingBalance,
+        used: updatedUsed,
+      },
+      { transaction }
     );
 
+    const reviewedAt = new Date();
+
+    // Approve leave
     await leaveData.update(
       {
         status: "APPROVED",
         reviewedBy: adminUser.id,
-        reviewedAt: new Date(),
+        reviewedAt,
         remark: "Approved By Admin",
       },
-      { transaction },
+      { transaction }
     );
 
+    // Save audit history
     await LeaveAuditLog.create(
       {
         leaveRequestId: leaveData.id,
         tenantId,
         newStatus: "APPROVED",
         action: "APPROVED",
-        reviewedAt: new Date(),
+        reviewedAt,
         reviewedBy: adminUser.id,
       },
-      { transaction },
+      { transaction }
     );
 
     const admin = await User.findOne({
-      where: getScopedWhere(adminUser, { role: "admin" }),
+      where: getScopedWhere(adminUser, {
+        role: "admin",
+      }),
       attributes: ["email"],
       raw: true,
+      transaction,
     });
 
-    const html = getLeaveApprovedTemplate({
-      managerName: admin?.email?.split("@")[0],
-      employeeName:
-        leaveData.employee?.first_name ||
-        leaveData.employee?.email.split("@")[0],
-      leaveType: leaveData.LeaveType.name,
-      startDate: leaveData.startDate,
-      endDate: leaveData.endDate,
-      daysRequested: leaveData.daysRequested,
-      reason: leaveData.reason,
-    });
-
-    sendMail(leaveData.employee.email, "Leave Request Approved", html);
+    notification = {
+      email: leaveData.employee.email,
+      subject: "Leave Request Approved",
+      html: getLeaveApprovedTemplate({
+        managerName: admin?.email?.split("@")[0] || "Admin",
+        employeeName:
+          leaveData.employee.first_name ||
+          leaveData.employee.email.split("@")[0],
+        leaveType: leaveData.LeaveType.name,
+        startDate: leaveData.startDate,
+        endDate: leaveData.endDate,
+        daysRequested: leaveData.daysRequested,
+        reason: leaveData.reason,
+      }),
+    };
 
     await transaction.commit();
+
+    // Email must not prevent a successful database approval
+    try {
+      await Promise.resolve(
+        sendMail(
+          notification.email,
+          notification.subject,
+          notification.html
+        )
+      );
+    } catch (mailError) {
+      console.error(
+        "Leave approval notification failed:",
+        mailError.message
+      );
+    }
 
     return {
       success: true,
       data: {
-        status: leaveData.status,
+        status: "APPROVED",
       },
-      messsage: "Leave Approved Successfully",
+      message: "Leave Approved Successfully",
     };
   } catch (error) {
-    await transaction.rollback();
-    throw new ExpressError(STATUS.BAD_REQUEST, error.message);
+    if (!transaction.finished) {
+      await transaction.rollback();
+    }
+
+    throw new ExpressError(
+      STATUS.BAD_REQUEST,
+      error.message
+    );
   }
 };
 
-export const rejectLeaveRequest = async (id, remark, adminUser) => {
+// ========================================
+// REJECT EMPLOYEE LEAVE REQUEST
+// ========================================
+
+export const rejectLeaveRequest = async (
+  id,
+  remark,
+  adminUser
+) => {
+  const tenantId = requireTenantId(adminUser);
+
   const transaction = await sequelize.transaction();
+
+  let notification = null;
+
   try {
-    const tenantId = requireTenantId(adminUser);
     const leaveData = await LeaveRequest.findOne({
-      where: { id, tenantId },
+      where: {
+        id,
+        tenantId,
+      },
       include: [
-        { model: LeaveAuditLog, as: "auditLogs", required: false },
         {
           model: User,
-          where: { role: "manager", tenantId },
+          where: {
+            role: "employee",
+            tenantId,
+          },
           as: "employee",
           required: true,
         },
@@ -153,125 +244,206 @@ export const rejectLeaveRequest = async (id, remark, adminUser) => {
           required: true,
         },
       ],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
-    if (!leaveData)
-      throw new ExpressError(STATUS.BAD_REQUEST, "Leave Request Not Found");
-
-    if (leaveData.status !== "PENDING" || leaveData.cancelRequest) {
-      return {
-        success: false,
-        message: "You can't reject this request, the action is already done",
-      };
+    if (!leaveData) {
+      throw new ExpressError(
+        STATUS.BAD_REQUEST,
+        "Leave Request Not Found"
+      );
     }
 
+    if (
+      leaveData.status !== "PENDING" ||
+      leaveData.cancelRequest
+    ) {
+      throw new ExpressError(
+        STATUS.BAD_REQUEST,
+        "This leave request is already processed or cancelled"
+      );
+    }
+
+    const reviewedAt = new Date();
+
+    // Reject leave
     await leaveData.update(
       {
         status: "REJECTED",
         reviewedBy: adminUser.id,
-        reviewedAt: new Date(),
-        reviewedBy: adminUser.id,
-        remark: remark,
+        reviewedAt,
+        remark: remark || "Rejected By Admin",
       },
-      { transaction },
+      { transaction }
     );
 
+    // Save audit history
     await LeaveAuditLog.create(
       {
         leaveRequestId: leaveData.id,
         tenantId,
         newStatus: "REJECTED",
         action: "REJECTED",
-        reviewedAt: new Date(),
+        reviewedAt,
         reviewedBy: adminUser.id,
       },
-      { transaction },
+      { transaction }
     );
 
     const admin = await User.findOne({
-      where: getScopedWhere(adminUser, { role: "admin" }),
+      where: getScopedWhere(adminUser, {
+        role: "admin",
+      }),
       attributes: ["email"],
       raw: true,
+      transaction,
     });
 
-    const html = getLeaveRejectedTemplate({
-      managerName: admin?.email?.split("@")[0],
-      employeeName:
-        leaveData.employee?.first_name ||
-        leaveData.employee?.email.split("@")[0],
-      leaveType: leaveData.LeaveType.name,
-      startDate: leaveData.startDate,
-      endDate: leaveData.endDate,
-      daysRequested: leaveData.daysRequested,
-      reason: remark,
-    });
-
-    sendMail(leaveData.employee.email, "Leave Request Rejected", html);
+    notification = {
+      email: leaveData.employee.email,
+      subject: "Leave Request Rejected",
+      html: getLeaveRejectedTemplate({
+        managerName: admin?.email?.split("@")[0] || "Admin",
+        employeeName:
+          leaveData.employee.first_name ||
+          leaveData.employee.email.split("@")[0],
+        leaveType: leaveData.LeaveType.name,
+        startDate: leaveData.startDate,
+        endDate: leaveData.endDate,
+        daysRequested: leaveData.daysRequested,
+        reason: remark || "Rejected By Admin",
+      }),
+    };
 
     await transaction.commit();
+
+    // Email failure should not undo rejection
+    try {
+      await Promise.resolve(
+        sendMail(
+          notification.email,
+          notification.subject,
+          notification.html
+        )
+      );
+    } catch (mailError) {
+      console.error(
+        "Leave rejection notification failed:",
+        mailError.message
+      );
+    }
 
     return {
       success: true,
       data: {
-        status: leaveData.status,
+        status: "REJECTED",
       },
-      messsage: "Leave Rejected Successfully",
+      message: "Leave Rejected Successfully",
     };
   } catch (error) {
-    await transaction.rollback();
-    throw new ExpressError(STATUS.BAD_REQUEST, error.message);
+    if (!transaction.finished) {
+      await transaction.rollback();
+    }
+
+    throw new ExpressError(
+      STATUS.BAD_REQUEST,
+      error.message
+    );
   }
 };
 
+// ========================================
+// GET ALL EMPLOYEE LEAVE REQUESTS
+// ========================================
+
 export const getLeaveRequests = async (
   { status = "PENDING", page = 1, limit = 10 },
-  adminUser,
+  adminUser
 ) => {
   try {
     const tenantId = requireTenantId(adminUser);
-    const offset = (page - 1) * limit;
 
-    const whereClause = { tenantId };
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const pageLimit = Math.max(
+      1,
+      Math.min(100, Number(limit) || 10)
+    );
 
-    if (!status || status === "PENDING") {
-      whereClause.status = "PENDING";
-    } else if (status === "all") {
-      whereClause.status = ["APPROVED", "REJECTED"];
-    } else {
-      whereClause.status = status.toUpperCase();
+    const offset = (pageNumber - 1) * pageLimit;
+
+    const whereClause = {
+      tenantId,
+    };
+
+    const normalizedStatus = String(
+      status || "PENDING"
+    ).toUpperCase();
+
+    const allowedStatuses = [
+      "ALL",
+      "PENDING",
+      "APPROVED",
+      "REJECTED",
+    ];
+
+    if (!allowedStatuses.includes(normalizedStatus)) {
+      throw new ExpressError(
+        STATUS.BAD_REQUEST,
+        "Invalid leave request status"
+      );
     }
 
-    const { rows, count } = await LeaveRequest.findAndCountAll({
-      where: whereClause,
-      include: [
-        {
-          model: User,
-          where: { role: "manager", tenantId },
-          as: "employee",
-          required: true,
-          attributes: ["id", "first_name", "email"],
-        },
-        {
-          model: LeaveType,
-          as: "LeaveType",
-          attributes: ["id", "name", "code"],
-          required: true,
-        },
-      ],
-      order: [["createdAt", "DESC"]],
-      offset,
-      limit: Number(limit),
-    });
+    if (normalizedStatus !== "ALL") {
+      whereClause.status = normalizedStatus;
+    }
+
+    const { rows, count } =
+      await LeaveRequest.findAndCountAll({
+        where: whereClause,
+        include: [
+          {
+            model: User,
+            where: {
+              role: "employee",
+              tenantId,
+            },
+            as: "employee",
+            required: true,
+            attributes: [
+              "id",
+              "first_name",
+              "email",
+            ],
+          },
+          {
+            model: LeaveType,
+            as: "LeaveType",
+            attributes: [
+              "id",
+              "name",
+              "code",
+            ],
+            required: true,
+          },
+        ],
+        order: [["createdAt", "DESC"]],
+        offset,
+        limit: pageLimit,
+      });
 
     return {
       success: true,
       data: rows,
       total: count,
-      currentPage: Number(page),
-      totalPages: Math.ceil(count / limit),
+      currentPage: pageNumber,
+      totalPages: Math.ceil(count / pageLimit),
       message: "Leave Requests Fetched Successfully",
     };
   } catch (error) {
-    throw new ExpressError(STATUS.BAD_REQUEST, error.message);
+    throw new ExpressError(
+      STATUS.BAD_REQUEST,
+      error.message
+    );
   }
 };

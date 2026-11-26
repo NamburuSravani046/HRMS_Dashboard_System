@@ -1,8 +1,10 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   Inventory2Outlined,
-  CurrencyExchange,
+    CurrencyExchange,
+  AccountBalanceWalletOutlined,
   ManageAccounts,
+PaymentsOutlined,
   PersonAdd,
   Accessibility,
   LocalMall,
@@ -128,12 +130,29 @@ export default function Sidebar({ open, setOpen }) {
             </NavLink>
 
             <NavLink
-              to="/admin/expenses"
-              onClick={() => setOpen(false)}
-              className={linkClass}
-            >
-              <CurrencyExchange fontSize="small" /> Expense Requests
-            </NavLink>
+  to="/admin/expenses"
+  onClick={() => setOpen(false)}
+  className={linkClass}
+>
+  <CurrencyExchange fontSize="small" /> Expense Requests
+</NavLink>
+
+<NavLink
+  to="/admin/salary"
+  onClick={() => setOpen(false)}
+  className={linkClass}
+>
+  <AccountBalanceWalletOutlined fontSize="small" />
+  Salary Management
+</NavLink>
+<NavLink
+  to="/admin/payroll"
+  onClick={() => setOpen(false)}
+  className={linkClass}
+>
+  <PaymentsOutlined fontSize="small" />
+  Payroll Management
+</NavLink>
           </div>
         </div>
 

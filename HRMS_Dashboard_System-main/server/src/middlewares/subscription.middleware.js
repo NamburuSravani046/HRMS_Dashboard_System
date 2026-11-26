@@ -1,8 +1,19 @@
-import { Subscription, Plans } from "../models/Associations.model.js";
+
+import { Subscription } from "../models/Associations.model.js";
 import { Op } from "sequelize";
 
 export const isSubscribed = async (req, res, next) => {
   try {
+    // Free HRMS demo mode:
+    // Skip subscription checks only in local development.
+    // Authentication and role permissions remain separate.
+    if (
+      process.env.NODE_ENV === "development" &&
+      process.env.HRMS_DEMO_MODE === "true"
+    ) {
+      return next();
+    }
+
     const role = req.user?.role;
     const tenantId = req.user?.tenantId;
 
@@ -20,8 +31,11 @@ export const isSubscribed = async (req, res, next) => {
     const now = new Date();
 
     const activeSubscription = await Subscription.findOne({
-      where: { tenantId, isActive: true, validTill: { [Op.gt]: now } },
-
+      where: {
+        tenantId,
+        isActive: true,
+        validTill: { [Op.gt]: now },
+      },
       order: [["createdAt", "DESC"]],
     });
 
@@ -34,8 +48,10 @@ export const isSubscribed = async (req, res, next) => {
 
     return next();
   } catch (error) {
-    return res
-      .status(500)
-      .json({ message: error.message || "Subscription check failed" });
+    console.error("Subscription check error:", error);
+
+    return res.status(500).json({
+      message: error.message || "Subscription check failed",
+    });
   }
 };
